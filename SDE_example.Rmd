@@ -213,12 +213,53 @@ gridExtra::grid.arrange(g1,g2,nrow=2)
 
 In the above approaches, the white noise deviations were all estimated. In this extension, we'll treat them all as known (referred to in oceanography literature as forcing variables, e.g. Cummings and Lagerloef 2002). 
 
-Starting with the analytical solution of the [scaled time-transformed Weiner process](https://en.wikipedia.org/wiki/Ornstein%E2%80%93Uhlenbeck_process#Alternative_representation_for_nonstationary_processes), 
+In this first example, we'll use the same least squares approach that has been used previously (Chhak et al. 2009, Di Lorenzo et al. 2010). In addition to finding the solution with least squares, note that this approach isn't estimating the process variance (because of the standardization). This function is the basic AR-1 model
 
 ```{r}
+ar_ls = function(time,forcing,theta) {
+  forcing = c(forcing - mean(forcing))
+  T=length(forcing)
+  sig = 0
 
+  for(t in 1:(T-1)) {
+    sig[t+1] = -theta*sig[t] + forcing[t]
+  }
+
+  # next estimates are linearly de-trended
+  sig = sig - lm(sig ~ time)$fitted.values
+  # interpolate output on the original time grid
+  s.sig=(sig[-1]+sig[-T])/2 # midpoint
+  # final step is normalize
+  s.sig=s.sig/sd(s.sig)
+  return(s.sig)
+}
+```
+
+and can be embedded in optim() to to optimization. Using our original example, 
+
+```{r}
+d = read.csv("data/example slp sst data.csv", 
+  stringsAsFactors = FALSE)
+
+# filter out NAs
+d = dplyr::filter(d, !is.na(sst.anom), year>=2006)
+
+# scale 
+d$sst.anom = scale(d$sst.anom)
+d$slp.anom.lag2 = scale(d$slp.anom.lag2)
+
+calc_ss = function(theta) {
+  pred_ts = ar_ls(1:nrow(d), forcing=d$slp.anom.lag2, theta)
+  ss = -sum((pred_ts - d$sst.anom[-1])^2) # return -SS for optim
+}
+
+o = optimize(f=calc_ss, interval = c(0,1))
+
+pred_ts = ar_ls(1:nrow(d), forcing=d$slp.anom.lag2, theta = o$minimum)
 ```
 
 
+
+Starting with the analytical solution of the [scaled time-transformed Weiner process](https://en.wikipedia.org/wiki/Ornstein%E2%80%93Uhlenbeck_process#Alternative_representation_for_nonstationary_processes), 
 
 
