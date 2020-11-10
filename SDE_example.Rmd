@@ -209,20 +209,20 @@ g2 = ggplot(df, aes(sigma, col = model)) +
 gridExtra::grid.arrange(g1,g2,nrow=2)
 ```
 
-## AR(1) SDE model (covariates)
+## Red noise time series
 
-In the above approaches, the white noise deviations were all estimated. In this extension, we'll treat them all as known (referred to in oceanography literature as forcing variables, e.g. Cummings and Lagerloef 2002). 
-
-In this first example, we'll use the same least squares approach that has been used previously (Chhak et al. 2009, Di Lorenzo et al. 2010). In addition to finding the solution with least squares, note that this approach isn't estimating the process variance (because of the standardization). This function is the basic AR-1 model
+Red noise time series can be created from white noise time series by including the AR component. This example uses the same terminology in oceanography models (DiLorenzo et al.), where $f$ is a forcing variable (white noise), and $\gamma$ is the '1/(decorrelation timescale)'. 
 
 ```{r}
-ar_ls = function(time,forcing,theta) {
+ar_ls = function(time,forcing,gamma) {
+  #S(t+1) = (1-GAMMA*DT)*S(t) + F(t)*DT
   forcing = c(forcing - mean(forcing))
   T=length(forcing)
   sig = 0
 
   for(t in 1:(T-1)) {
-    sig[t+1] = -theta*sig[t] + forcing[t]
+    #sig[t+1] = -theta*sig[t] + forcing[t]
+    sig[t+1] = (1-gamma)*sig[t] + forcing[t]
   }
 
   # next estimates are linearly de-trended
@@ -235,7 +235,23 @@ ar_ls = function(time,forcing,theta) {
 }
 ```
 
-and can be embedded in optim() to to optimization. Using our original example, 
+We can plot several red noise series with the same deviations, but different values of gamma,
+
+```{r}
+set.seed(123)
+x = rnorm(100)
+df = rbind(data.frame("t"=1:99, "y"=ar_ls(1:100, x, 1/3),"gamma"="1/3"),
+data.frame("t"=1:99, "y"=ar_ls(1:100, x, 1/20),"gamma"="1/20"))
+
+ggplot(df, aes(t,y,group=gamma,col=gamma)) + geom_line() + 
+  xlab("Time") + ylab("Y")
+```
+
+## AR(1) SDE model (covariates)
+
+In the above approaches, the white noise deviations were all estimated. In this extension, we'll treat them all as known (referred to in oceanography literature as forcing variables, e.g. Cummings and Lagerloef 2002). 
+
+In this first example, we'll use the same least squares approach that has been used previously (Chhak et al. 2009, Di Lorenzo et al. 2010). In addition to finding the solution with least squares, note that this approach isn't estimating the process variance (because of the standardization). This function is the basic AR-1 model and can be embedded in optim() to to optimization. Using our original example, 
 
 ```{r}
 d = read.csv("data/example slp sst data.csv", 
@@ -244,6 +260,7 @@ d = read.csv("data/example slp sst data.csv",
 # filter out NAs
 d = dplyr::filter(d, !is.na(sst.anom), year>=2006)
 
+d$date = lubridate::parse_date_time(x = paste(d$year,d$month,"01"),orders="ymd",tz="Pacific")
 # scale 
 d$sst.anom = scale(d$sst.anom)
 d$slp.anom.lag2 = scale(d$slp.anom.lag2)
@@ -255,11 +272,60 @@ calc_ss = function(theta) {
 
 o = optimize(f=calc_ss, interval = c(0,1))
 
-pred_ts = ar_ls(1:nrow(d), forcing=d$slp.anom.lag2, theta = o$minimum)
+pred_ts = ar_ls(1:nrow(d), forcing=d$slp.anom.lag2, gamma = o$minimum)
+
+df = rbind(data.frame("t"=d$date, "y"=d$sst.anom,"response"="sst_anomaly"),
+  data.frame("t"=d$date, "y"=d$slp.anom.lag2,"response"="slp_anomaly"),
+  data.frame("t"=d$date, "y"=c(0,as.numeric(pred_ts)),"response"="integrated_sst"))
+
+ggplot(df, aes(t, y, group=response,col=response)) + geom_line() +
+  xlab("Time") + ylab("Response")
 ```
 
+### Bayesian implementation
 
+We can't do the exact Bayesian equivalent -- because the approach above uses the sum of squares, rather than likelihood. But we can tweak the above approach to have an estimated observation error component. 
 
-Starting with the analytical solution of the [scaled time-transformed Weiner process](https://en.wikipedia.org/wiki/Ornstein%E2%80%93Uhlenbeck_process#Alternative_representation_for_nonstationary_processes), 
+```{r}
+data_list = list(
+  N = nrow(d),
+  M = 1, # resolution, should be higher than 10 (more like 100 or 1000)
+  obs_y = c(d$sst.anom),
+  obs_x = c(d$slp.anom.lag2)
+)
 
+fit = stan("code/ar1_forcing_ss.stan", 
+  data = data_list, 
+  pars = c("sigma","pred_y","tau","obs_sigma"),
+  iter=3000, 
+  chains=1, 
+  control=list(adapt_delta=0.99, max_treedepth=20))
+pars = rstan::extract(fit)
+
+```
+
+We can plot the values versus the SS approach above and see the 2 methods agree. Note: in the SDE above, the process variance was estimated, but here it's fixed at 1 so the integrated SST will be on the same scale as the sum of squares.
+
+```{r, fig.pos="placeHere", fig.cap = "Bayesian vs SS estimates when forcing variable rather than white noise is included"}
+df = rbind(data.frame("t"=d$date, "y"=c(0,as.numeric(pred_ts)),"method"="sum_squares"),
+  data.frame("t"=d$date, "y"=apply(pars$pred_y,2,mean),"method"="bayesian")
+  )
+
+ggplot(df, aes(t, y, group=method,col=method)) + geom_line() +
+  xlab("Time") + ylab("Integrated SST")
+```
+
+Finally, we can put some credible intervals on our estimated integrated SST.
+
+```{r}
+df = data.frame("t"=d$date, 
+  "y"=apply(pars$pred_y,2,mean),
+  "low"=apply(pars$pred_y,2,quantile,0.025),
+  "hi"=apply(pars$pred_y,2,quantile,0.975))
+
+ggplot(df, aes(t, y)) + 
+  geom_ribbon(aes(ymin = low, ymax = hi),fill="darkblue",alpha=0.5) + 
+  geom_line(col="darkblue") +
+  xlab("Time") + ylab("Integrated SST")
+```
 
