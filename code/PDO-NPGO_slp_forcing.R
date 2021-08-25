@@ -216,3 +216,11 @@ rbind(y1,y2,y3) %>%
   geom_line(alpha=0.5) +
   ylab("Ln(std.error of estimate")
 dev.off()
+
+# recalculate correlations with Bayesian estimates
+pred.pdo = data.frame(t = dat$date,
+                      sst.pc1 = dat$sst,
+                      integrated.slp = c(0,-as.numeric(pred_ts)))
+cor(pred.pdo$sst.pc1, -y1$estimate)
+cor(pred.pdo$sst.pc1, -y2$estimate)
+cor(pred.pdo$sst.pc1, -y3$estimate)
