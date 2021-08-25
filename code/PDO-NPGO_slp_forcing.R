@@ -11,7 +11,7 @@ theme_set(theme_bw())
 cb <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
 
 # load data
-d = read.csv("data/slp_sst_PCs_1948-2021.csv", 
+d = read.csv("data/slp_sst_PCs_1948-2021.csv",
              stringsAsFactors = FALSE)
 
 # these data are PC1/PC2 of NE Pacific SLPa/SSTa for 1/1948 - 5/2021
@@ -54,13 +54,14 @@ ar_ls = function(time,forcing,gamma) {
   forcing = c(forcing - mean(forcing))
   T=length(forcing)
   sig = 0
-  
+
   for(t in 1:(T-1)) {
     #sig[t+1] = -theta*sig[t] + forcing[t]
     sig[t+1] = (1-gamma)*sig[t] + forcing[t]
   }
-  
+
   # next estimates are linearly de-trended
+#  s.sig = sig
   sig = sig - lm(sig ~ time)$fitted.values
   # interpolate output on the original time grid
   s.sig=(sig[-1]+sig[-T])/2 # midpoint
@@ -85,14 +86,14 @@ pred.pdo = data.frame(t = dat$date,
 
 cor(pred.pdo$sst.pc1, pred.pdo$integrated.slp)
 
-ggplot(pred.pdo, aes(integrated.slp, sst.pc1)) + 
+ggplot(pred.pdo, aes(integrated.slp, sst.pc1)) +
   geom_point() +
   geom_smooth(method = "gam", formula = y ~ s(x, k=4), se = F)
 
 # this is getting into the weeds, but doesn't seem quite like a linear relationship
 summary(mgcv::gam(sst.pc1 ~ s(integrated.slp, k = 4), data = pred.pdo))
 
-pred.pdo <- pred.pdo %>% 
+pred.pdo <- pred.pdo %>%
   pivot_longer(cols = -t)
 
 pdo.reconstruct <- ggplot(pred.pdo, aes(t, value, color = name)) +
@@ -100,11 +101,9 @@ pdo.reconstruct <- ggplot(pred.pdo, aes(t, value, color = name)) +
   scale_color_manual(values = cb[c(2,6)], labels = c("Integrated SLP PC1", "SST PC1")) +
   theme(legend.title = element_blank(),
         legend.position = c(0.8, 0.95),
-        axis.title.x = element_blank()) + 
+        axis.title.x = element_blank()) +
   ggtitle("PDO (r = 0.37)") +
   ylab("Anomaly")
-  
-  
 
 # compare with NPGO
 dat <- data.frame(date = sst$date[2:nrow(sst)],
@@ -127,7 +126,7 @@ pred.npgo = data.frame(t = dat$date,
 
 cor(pred.npgo$sst.pc2, pred.npgo$integrated.slp)
 
-ggplot(pred.npgo, aes(integrated.slp, sst.pc2)) + 
+ggplot(pred.npgo, aes(integrated.slp, sst.pc2)) +
   geom_point() +
   geom_smooth(method = "gam", formula = y ~ s(x, k=4), se = F)
 
@@ -139,7 +138,7 @@ npgo.reconstruct <-ggplot(pred.npgo, aes(t, value, color = name)) +
   scale_color_manual(values = cb[c(2,6)], labels = c("Integrated SLP PC2", "SST PC2")) +
   theme(legend.title = element_blank(),
         legend.position = c(0.8, 0.95),
-        axis.title.x = element_blank()) + 
+        axis.title.x = element_blank()) +
   ggtitle("NPGO (r = 0.08)") +
   ylab("Anomaly")
 
@@ -148,19 +147,72 @@ ggarrange(pdo.reconstruct, npgo.reconstruct, ncol=1)
 dev.off()
 
 
-# Bayesian version - throws error
+# Bayesian version. M = 1 here, because the forcing variable obs_x
+# is already discretized and there's no missing values
 data_list = list(
-  M = 20, # resolution, should be higher than 10 (more like 100 or 1000)
+  M = 1,
   N = nrow(dat),
   obs_y = c(dat$sst),
   obs_x = c(dat$slp)
 )
 
-  
-fit = stan("code/ar1_forcing_ss.stan", 
-           data = data_list, 
-           pars = c("sigma","pred_y","tau","obs_sigma"),
-           iter=3000, 
-           chains=1, 
-           control=list(adapt_delta=0.99, max_treedepth=20))
+# first Bayesian model is estimating both gamma, obs_sigma, and sigma,
+# which scales the forcing.
+library(bayesplot)
+fit = stan("code/ar1_forcing_ss.stan",
+           data = data_list,
+           pars = c("sigma","pred_y","gamma","obs_sigma"),
+           iter=5000,
+           chains=3)
 pars = rstan::extract(fit)
+
+mcmc_areas(fit, pars = c("sigma","gamma","obs_sigma"))
+
+## Second, we can fix the process sd, "sigma" at 1 and re-fit
+fit2 = stan("code/ar1_forcing_ss_fixsig.stan",
+           data = data_list,
+           pars = c("pred_y","gamma","obs_sigma"),
+           iter=5000,
+           chains=3)
+pars = rstan::extract(fit2)
+mcmc_areas(fit2, pars = c("gamma","obs_sigma"))
+
+## Third, if we knew the observation error standard deviation of these SST
+# measurements, we could pass that in as a known quantity and only estimate
+# 'gamma' -- this is most directly similar to the SS approach in the optim
+# function above. Note: the mean estimates of the trajectory won't change if
+# you vary obs_sigma, but the precision of the estimates will
+data_list$obs_sigma = 0.1
+fit3 = stan("code/ar1_forcing_ss_fixbothsig.stan",
+            data = data_list,
+            pars = c("pred_y","gamma"),
+            iter=5000,
+            chains=3)
+pars = rstan::extract(fit3)
+mcmc_areas(fit3, pars = c("gamma"))
+
+## Now we can also compare estimates across the three models
+library(broom.mixed)
+y1 = tidy(fit, pars=c("pred_y"))
+y1$time = seq(1,nrow(y1))
+y1$model = "ss"
+y2 = tidy(fit2, pars=c("pred_y"))
+y2$time = seq(1,nrow(y2))
+y2$model = "fixsig"
+y3 = tidy(fit3, pars=c("pred_y"))
+y3$time = seq(1,nrow(y3))
+y3$model = "fixboth"
+png("figs/bayes_estimates.png", width=6, height=8, units='in', res=300)
+rbind(y1,y2,y3) %>%
+  ggplot(aes(time, estimate,fill=model,col=model)) +
+  geom_ribbon(aes(ymin=estimate-std.error,ymax=estimate+std.error),alpha=0.1) +
+  geom_line(alpha=0.1)
+dev.off()
+# look at the std error rather than the estimate. this shows that
+png("figs/bayes_sds_of_estimates.png", width=6, height=8, units='in', res=300)
+rbind(y1,y2,y3) %>%
+  ggplot(aes(time, log(std.error),fill=model,col=model)) +
+  #geom_ribbon(aes(ymin=estimate-std.error,ymax=estimate+std.error),alpha=0.1) +
+  geom_line(alpha=0.5) +
+  ylab("Ln(std.error of estimate")
+dev.off()
