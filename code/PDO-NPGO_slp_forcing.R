@@ -79,6 +79,9 @@ o = optimize(f=calc_ss, interval = c(0,1))
 
 pred_ts = ar_ls(1:nrow(dat), forcing=dat$slp, gamma = o$minimum)
 
+# save gamma estimate for comparison to Bayes version below
+pdo.gamma.ls <- o$minimum
+
 pred.pdo = data.frame(t = dat$date,
                       sst.pc1 = dat$sst,
                       integrated.slp = c(0,-as.numeric(pred_ts))) ## NB - reversing the sign of integrated SLP
@@ -119,6 +122,9 @@ o = optimize(f=calc_ss, interval = c(0,1))
 
 pred_ts = ar_ls(1:nrow(dat), forcing=dat$slp, gamma = o$minimum)
 
+# save gamma estimate for comparison to Bayes version below
+npgo.gamma.ls <- o$minimum
+
 pred.npgo = data.frame(t = dat$date,
                       sst.pc2 = dat$sst,
                       integrated.slp = c(0, -as.numeric(pred_ts))) ## NB - reversing the sign of integrated SLP
@@ -147,8 +153,15 @@ ggarrange(pdo.reconstruct, npgo.reconstruct, ncol=1)
 dev.off()
 
 
-# Bayesian version. M = 1 here, because the forcing variable obs_x
-# is already discretized and there's no missing values
+### Bayesian version --------------------
+# M = 1 here, because the forcing variable obs_x
+# is already discretized and there's no missing values 
+
+# redefine data_list to make it clear what we're working on
+dat <- data.frame(date = sst$date[2:nrow(sst)],
+                  sst = sst$pc1[2:nrow(sst)],
+                  slp = slp$pc1[1:nrow(slp)-1])
+
 data_list = list(
   M = 1,
   N = nrow(dat),
@@ -189,7 +202,13 @@ fit3 = stan("code/ar1_forcing_ss_fixbothsig.stan",
             iter=5000,
             chains=3)
 pars = rstan::extract(fit3)
+
+# save gamma estimate for comparison to ls approach
+npgo.gamma.bayes <- median(pars$gamma)
+
 mcmc_areas(fit3, pars = c("gamma"))
+ggsave("./figs/gamma_npgo_model3.png", width = 6, height = 4, units = 'in')
+
 
 ## Now we can also compare estimates across the three models
 library(broom.mixed)
@@ -249,7 +268,28 @@ pdofit3 = stan("code/ar1_forcing_ss_fixbothsig.stan",
             iter=5000,
             chains=3)
 pars = rstan::extract(pdofit3)
+
+# save gamma estimate for comparison to ls approach
+pdo.gamma.bayes <- median(pars$gamma)
+
+# and plot this comparison
+plot.gamma <- data.frame(pdo_least_squares = pdo.gamma.ls,
+                         pdo_bayes = pdo.gamma.bayes,
+                         npgo_least_squares = npgo.gamma.ls,
+                         npgo_bayes = npgo.gamma.bayes)
+
+plot.gamma <- pivot_longer(plot.gamma, cols = 1:4)
+
+
+ggplot(plot.gamma, aes(name, value)) +
+  geom_col()
+
+ggsave("./figs/gamma_estimates_ls_bayes.png", width = 5, height = 4, units = 'in')
+
+
+
 mcmc_areas(pdofit3, pars = c("gamma"))
+ggsave("./figs/gamma_pdo_model3.png", width = 6, height = 4, units = 'in')
 
 y3 = tidy(pdofit3, pars=c("pred_y"))
 y3$time = seq(1,nrow(y3))
