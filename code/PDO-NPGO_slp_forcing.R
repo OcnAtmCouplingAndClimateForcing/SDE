@@ -208,6 +208,7 @@ rbind(y1,y2,y3) %>%
   geom_ribbon(aes(ymin=estimate-std.error,ymax=estimate+std.error),alpha=0.1) +
   geom_line(alpha=0.1)
 dev.off()
+
 # look at the std error rather than the estimate. this shows that
 png("figs/bayes_sds_of_estimates.png", width=6, height=8, units='in', res=300)
 rbind(y1,y2,y3) %>%
@@ -218,9 +219,46 @@ rbind(y1,y2,y3) %>%
 dev.off()
 
 # recalculate correlations with Bayesian estimates
-pred.pdo = data.frame(t = dat$date,
-                      sst.pc1 = dat$sst,
+pred.npgo = data.frame(t = dat$date,
+                      sst.pc2 = dat$sst,
                       integrated.slp = c(0,-as.numeric(pred_ts)))
-cor(pred.pdo$sst.pc1, -y1$estimate)
-cor(pred.pdo$sst.pc1, -y2$estimate)
-cor(pred.pdo$sst.pc1, -y3$estimate)
+cor(pred.npgo$sst.pc2, -y1$estimate)
+cor(pred.npgo$sst.pc2, -y2$estimate)
+cor(pred.npgo$sst.pc2, -y3$estimate)
+
+## Compare with Bayesian model of PDO -------------------------------
+
+dat <- data.frame(date = sst$date[2:nrow(sst)],
+                  sst = sst$pc1[2:nrow(sst)],
+                  slp = slp$pc1[1:nrow(slp)-1])
+
+data_list = list(
+  M = 1,
+  N = nrow(dat),
+  obs_y = c(dat$sst),
+  obs_x = c(dat$slp)
+)
+
+# fit to model 3 - closest to SS approach
+
+data_list$obs_sigma = 0.1
+
+pdofit3 = stan("code/ar1_forcing_ss_fixbothsig.stan",
+            data = data_list,
+            pars = c("pred_y","gamma"),
+            iter=5000,
+            chains=3)
+pars = rstan::extract(pdofit3)
+mcmc_areas(pdofit3, pars = c("gamma"))
+
+y3 = tidy(pdofit3, pars=c("pred_y"))
+y3$time = seq(1,nrow(y3))
+
+
+# recalculate correlations with Bayesian estimates
+pred.pdo = data.frame(t = dat$date,
+                       sst.pc1 = dat$sst,
+                       integrated.slp = c(0,-as.numeric(pred_ts)))
+
+cor(pred.pdo$sst.pc1, y3$estimate)
+
