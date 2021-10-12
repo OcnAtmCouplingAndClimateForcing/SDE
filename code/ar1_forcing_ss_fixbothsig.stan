@@ -28,7 +28,7 @@ transformed parameters {
 }
 model {
   // priors
-  gamma ~ normal(1,0.1); // 1/theta
+  gamma ~ normal(0.5,1); // 1/theta
   //obs_sigma ~ student_t(3,0,0.1); // variability of sn
   for(t in 1:N) {
     obs_y[t] ~ normal(pred_y[t], obs_sigma);

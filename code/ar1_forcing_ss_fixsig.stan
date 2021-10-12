@@ -41,7 +41,7 @@ model {
   // priors
   //real sig;
   x00 ~ normal(obs_y[1],2); // initial state
-  gamma ~ normal(1,0.1); // 1/theta
+  gamma ~ normal(0.5,1); // 1/theta
   //sn ~ normal(0, 1); // white noise with sd = 1
   obs_sigma ~ normal(0,0.1); // variability of sn
   //sigma ~ normal(0,1); // variability of sn

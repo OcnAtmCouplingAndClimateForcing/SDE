@@ -49,6 +49,9 @@ dat <- data.frame(date = sst$date[2:nrow(sst)],
                   sst = sst$pc1[2:nrow(sst)],
                   slp = slp$pc1[1:nrow(slp)-1])
 
+# ar_ls calculates the process deviations after
+# accounting for forcing variables and autocorrelation,
+# (1-gamma)
 ar_ls = function(time,forcing,gamma) {
   #S(t+1) = (1-GAMMA*DT)*S(t) + F(t)*DT
   forcing = c(forcing - mean(forcing))
@@ -61,7 +64,7 @@ ar_ls = function(time,forcing,gamma) {
   }
 
   # next estimates are linearly de-trended
-#  s.sig = sig
+  #s.sig = sig
   sig = sig - lm(sig ~ time)$fitted.values
   # interpolate output on the original time grid
   s.sig=(sig[-1]+sig[-T])/2 # midpoint
@@ -72,12 +75,14 @@ ar_ls = function(time,forcing,gamma) {
 
 calc_ss = function(theta) {
   pred_ts = ar_ls(1:nrow(dat), forcing=dat$slp, theta)
-  ss = -sum((pred_ts - dat$sst[-1])^2) # return -SS for optim
+  ss = sum((pred_ts - dat$sst[-1])^2) # return SS for optim (minimizes by default)
 }
 
-o = optimize(f=calc_ss, interval = c(0,1))
+# optimize by default is minimizing (with maximum = FALSE)
+o = optimize(f=calc_ss, interval = c(0,1), maximum=FALSE)
 
-pred_ts = ar_ls(1:nrow(dat), forcing=dat$slp, gamma = o$minimum)
+pred_ts = ar_ls(1:nrow(dat), forcing=dat$slp,
+                gamma = o$minimum)
 
 # save gamma estimate for comparison to Bayes version below
 pdo.gamma.ls <- o$minimum
@@ -115,7 +120,7 @@ dat <- data.frame(date = sst$date[2:nrow(sst)],
 
 calc_ss = function(theta) {
   pred_ts = ar_ls(1:nrow(dat), forcing=dat$slp, theta)
-  ss = -sum((pred_ts - dat$sst[-1])^2) # return -SS for optim
+  ss = sum((pred_ts - dat$sst[-1])^2) # return -SS for optim
 }
 
 o = optimize(f=calc_ss, interval = c(0,1))
@@ -155,12 +160,12 @@ dev.off()
 
 ### Bayesian version --------------------
 # M = 1 here, because the forcing variable obs_x
-# is already discretized and there's no missing values 
+# is already discretized and there's no missing values
 
 # redefine data_list to make it clear what we're working on
 dat <- data.frame(date = sst$date[2:nrow(sst)],
-                  sst = sst$pc1[2:nrow(sst)],
-                  slp = slp$pc1[1:nrow(slp)-1])
+                  sst = sst$pc2[2:nrow(sst)],
+                  slp = slp$pc2[1:nrow(slp)-1])
 
 data_list = list(
   M = 1,
