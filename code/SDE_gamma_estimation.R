@@ -150,9 +150,6 @@ output.2 <- data.frame()
 for(i in 1:length(tau)){
   # i <- 1  
   
-  # optimize by default is minimizing (with maximum = FALSE)
-  # o = optimize(f=calc_ss, interval = c(0,1), maximum=FALSE)
-  
   pred_ts = ar_ls(1:nrow(dat), forcing=dat$slp,
                   gamma = 1/tau[i])
   
