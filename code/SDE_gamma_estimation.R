@@ -78,7 +78,7 @@ ar_ls = function(time,forcing,gamma) {
   #s.sig = sig
   sig = sig - lm(sig ~ time)$fitted.values
   # interpolate output on the original time grid
-  s.sig=(sig[-1]+sig[-T])/2 # midpoint
+  s.sig = s.sig=(sig[-1]+sig[-T])/2 # midpoint
   # final step is normalize
   s.sig=s.sig/sd(s.sig)
   return(s.sig)
@@ -90,9 +90,13 @@ calc_ss = function(theta) {
 }
 
 ## loop through a range of maximum values of gamma (0.01 - 1)
-interval.max <- seq(0.01, 1, by = 0.01)
+output <- data.frame(gamma = seq(0.01,1,by=0.01))
+output$ss = rep(0, nrow(output))
 
-output <- data.frame()
+for(i in 1:nrow(output)){
+  output$ss[i] = calc_ss(theta=output$gamma[i])
+}
+plot(output$gamma, output$ss)
 
 for(i in 1:length(interval.max)){
 # i <- 1  
